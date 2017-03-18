@@ -1,0 +1,187 @@
+def SplitDatabyOrder(n,X_all,y_all):#split data into n+1 group
+    len_num = len(X_all)
+    ng = len_num/n
+    X_all_train = list()
+    y_all_train = list()
+    for i in range(0,n):
+        X_per_group = X_all[i*ng:(i+1)*ng]
+        X_all_train.append(X_per_group)
+        Y_per_group = y_all[i*ng:(i+1)*ng]
+        y_all_train.append(Y_per_group)
+    X_per_group = X_all[n*ng:]
+    X_all_train.append(X_per_group)
+    Y_per_group = y_all[n*ng:]
+    y_all_train.append(Y_per_group)
+    return X_all_train,y_all_train
+    
+def SplitData_Merge(n,n_p,X_all,y_all):
+    len_num = len(X_all)#number of data
+    per_p = len_num/n_p#estimate number of data in per position
+    ng = per_p/n
+    X_all_train = list()
+    y_all_train = list()
+    for i in range(0,n):
+        X_per_group = list()
+        y_per_group = list()
+        for j in range(0,n_p):
+            X_per_group.extend(X_all[j*per_p+i*ng:j*per_p+(i+1)*ng])
+            y_per_group.extend(y_all[j*per_p+i*ng:j*per_p+(i+1)*ng])
+        X_all_train.append(X_per_group)
+        y_all_train.append(y_per_group)
+    X_per_group = X_all[n_p*per_p:]
+    X_all_train.append(X_per_group)
+    Y_per_group = y_all[n_p*per_p:]
+    y_all_train.append(Y_per_group)
+    return X_all_train,y_all_train
+    
+def mapYtocontinue(y):
+    yo = list()
+    d = dict()
+    for yi in y:
+        yo.append(yi)
+    ys = list(set(y))
+    ys.sort()
+    ym = list()
+    for yi in yo:
+        ym.append(ys.index(yi))
+        d[ys.index(yi)] = yi
+    return ym,d
+#y = [2,1,4,6,7,2,23,82,4238,12,4,1,3,5,21]
+#ym,d = mapYtocontinue(y)
+
+import numpy as np;
+import re;
+import time;
+from datetime import datetime
+import pickle
+from pystruct.models import ChainCRF
+from pystruct.learners import FrankWolfeSSVM
+from pystruct.utils import SaveLogger
+#import matplotlib.pyplot as plt
+sec_len = 6;#the length of time slot when training 
+y_index = 2;
+fea_w = list();#whether feature in every time slot
+whether = list();#all whether features
+slot_a = list();#
+AQI = list();
+ToRec = False;
+ToSplitTime = False;
+
+file_ads = "/Users/Claire/Desktop/intern/20170313/CrawledData_inter1.txt";
+f = open(file_ads,"r");
+line = f.readline();
+row = list();#record every line in integer format
+record = list();#record all lines in integer format
+continue_t = list();
+linenum = 0;#flag to record the length of lines
+flag = True;
+
+if ToRec:
+    while line:
+        line = f.readline()
+        linenum = linenum + 1
+    #if linenum%10000 == 0:
+        #print linenum
+        if line == '':
+        #print linenum
+            break
+        temp = re.split(',',line);
+        row.append(int(temp[0]))
+        dt_obj = datetime.strptime(temp[1], '%m/%d/%Y %I:%M:%S %p')
+        temp[1] = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
+        timeArray = time.strptime(temp[1], "%Y-%m-%d %H:%M:%S")
+        timeStamp = int(time.mktime(timeArray))
+        row.append(timeStamp)
+        for i in range(2,5):
+            if temp[i] == '' or temp[i] =='\r\n':
+            #print temp[i]
+                row.append('NA')
+            else:
+                temp[i] = int(temp[i])
+                row.append(temp[i])
+        for i in range(5,10):
+            if temp[i] == '' or temp[i] =='\r\n':
+            #print temp[i]
+                row.append('NA')
+            else:
+                temp[i] = float(temp[i])
+                row.append(temp[i])
+        record.append(row)
+        row = list()
+    f.close()
+    output = open('record_integer_format.pkl','wb')
+    pickle.dump(record,output,0)
+    output.close()
+else:
+    pkl_file = open('record_integer_format.pkl', 'rb')
+    record = pickle.load(pkl_file)
+    pkl_file.close()
+    
+#calculate the length of continue time slot
+if ToSplitTime:
+    r_len = len(record)
+    continue_t = list();#{(start_time,end_time,length)}
+    i=0;
+    while i < r_len:
+        #if i%10000 == 0:
+            #print i
+        for j in range(i+1,r_len):
+            if record[j][1]-record[j-1][1] != 3600 :
+                continue_t.append([i,j-1,j-1-i])
+                i = j;
+                break;
+    #if j > 169900:
+        #print j
+        if j == r_len-1:
+            break;
+    output = open('continue_time_slot.pkl','wb')
+    pickle.dump(continue_t,output,0)
+    output.close()
+else:
+    pkl_file = open('continue_time_slot.pkl', 'rb')
+    continue_t = pickle.load(pkl_file)
+    pkl_file.close()
+    
+#calculate features to whether #time_slots * len_slot * (whether_feature + time order)
+whether = list();
+for i in range(0,len(continue_t)):
+    if continue_t[i][2] >= sec_len-1:
+        k = continue_t[i][0];
+        while k < continue_t[i][1] - sec_len:
+            for m in range(0,sec_len):
+                #add time order as a feature
+                a = record[k+m][5:]
+                a.append(m)
+                fea_w.append(a)
+                slot_a.append(record[k+m][y_index])
+            fea_w = np.array(fea_w, dtype = np.int16)
+            slot_a = np.array(slot_a,dtype = np.int16)
+            whether.append(fea_w)
+            AQI.append(slot_a)
+            fea_w = list()
+            slot_a = list()
+            k = k + 1
+            
+ XAT,YAT = SplitData_Merge(30,36,whether,AQI)
+ 
+ for i in range(0,30):
+    experiment_name = "ssvm_trainval"+str(i)
+    X_train =  np.array(XAT[i])
+    y_ = np.array(YAT[i])
+    yf = list(y_.flatten())
+    ym,d = mapYtocontinue(yf)
+    y_train = (np.array(ym)).reshape(len(y_),sec_len)
+    model = ChainCRF()
+    ssvm = FrankWolfeSSVM(model=model, C=.1, max_iter=10, logger=SaveLogger(experiment_name + ".pickle", save_every=10))
+    ssvm.fit(X_train, y_train) 
+    
+savedSSVM = SaveLogger("/Users/Claire/Desktop/intern/20170317/ssvm_trainval.pickle").load()
+X_test = np.array(XAT[0])
+y_ = np.array(YAT[0])
+yf = list(y_.flatten())
+ym,d = mapYtocontinue(yf)
+y_test = (np.array(ym)).reshape(len(y_),sec_len)
+
+savedSSVM.score(X_test[567:575],y_test[567:575])
+
+savedSSVM.predict(X_test[385:390])
